@@ -226,10 +226,14 @@ elif input_method == "Backfill messages from Sheets":
             ]
 
             if usernames:
-                st.info(f"**{len(usernames)} profiles** need re-enrichment + messaging.")
+                st.info(
+                    f"**{len(usernames)} profiles** need enrichment (for career data) + messaging. "
+                    f"Tiering will be skipped — using existing tiers from the Sheet."
+                )
                 st.session_state['_prev_batch_df'] = prev_df
                 st.session_state['_prev_batch_tab'] = batch['name']
                 st.session_state['_rerun_mode'] = True
+                st.session_state['_skip_tiering'] = True
 
 
 # ─── Run Pipeline ────────────────────────────────────────────────────────────
@@ -300,9 +304,44 @@ if usernames:
 
             # ── Stage 2: Tiering ─────────────────────────────────────
             if enriched:
-                st.subheader("Stage 2: Tiering profiles")
-                with st.spinner("Running tiering engine..."):
-                    tiered = tier_profiles(enriched)
+                skip_tiering = st.session_state.get('_skip_tiering', False)
+
+                if skip_tiering and '_prev_batch_df' in st.session_state:
+                    # Backfill mode: use tiering from Sheets, skip re-tiering
+                    st.subheader("Stage 2: Using existing tiers from Google Sheets")
+                    prev_df = st.session_state['_prev_batch_df']
+                    prev_df['tier'] = prev_df['tier'].astype(str)
+
+                    # Build tiered dict from Sheet data, keyed by username
+                    from utils import clean_linkedin_username
+                    tiered = {}
+                    for _, row in prev_df.iterrows():
+                        url = str(row.get('linkedin_url', ''))
+                        username = clean_linkedin_username(url)
+                        if username and username in enriched:
+                            tiered[username] = {
+                                'tier': str(row.get('tier', 'Out of Scope')),
+                                'tier_confidence': str(row.get('tier_confidence', 'Medium')),
+                                'investor_or_customer': str(row.get('investor_or_customer', 'Investor')),
+                                'domain_relevance': row.get('domain_relevance', 0),
+                                'investor_plausibility': row.get('investor_plausibility', 0),
+                                'strategic_fit': row.get('strategic_fit', 0),
+                                'non_customer_suitability': row.get('non_customer_suitability', 0),
+                                'personalisation_strength': row.get('personalisation_strength', 0),
+                                'priority_score': row.get('priority_score', 0),
+                                'priority_bucket': str(row.get('priority_bucket', 'Medium')),
+                                'investor_fit_summary': str(row.get('investor_fit_summary', '')),
+                                'rationale_for_tier': str(row.get('rationale_for_tier', '')),
+                                'key_career_signals': str(row.get('key_career_signals', '')),
+                                'customer_exclusion_flag': str(row.get('customer_exclusion_flag', 'NO')),
+                                'notes_for_review': str(row.get('notes_for_review', '')),
+                            }
+                    st.success(f"Loaded tiers for **{len(tiered)}** profiles from Sheets (no re-tiering)")
+                else:
+                    # Normal mode: run tiering
+                    st.subheader("Stage 2: Tiering profiles")
+                    with st.spinner("Running tiering engine..."):
+                        tiered = tier_profiles(enriched)
 
                 tier_counts = {}
                 for t in tiered.values():
@@ -320,40 +359,41 @@ if usernames:
                 )
                 cols[4].metric("Customers", cust_count)
 
-                # ── AUTO-SAVE: tiering CSV before messaging ─────────────
-                # This ensures enrichment + tiering is NEVER lost
-                tiering_df = build_results_dataframe(
-                    list(enriched.keys()), enriched, tiered, {}
-                )
-                st.session_state['results_df'] = tiering_df
-                st.session_state['pipeline_complete'] = True
+                # ── Save state for messaging ────────────────────────────
                 st.session_state['_enriched'] = enriched
                 st.session_state['_tiered'] = tiered
                 st.session_state['_messaging_complete'] = False
-                save_batch_to_history(tiering_df)
+                st.session_state['pipeline_complete'] = True
 
-                tiering_csv = dataframe_to_csv(tiering_df)
-                tier_fname = f"stellar_tiering_{datetime.now().strftime('%Y%m%d_%H%M')}.csv"
-                st.success("Enrichment + tiering saved. Download tiering-only CSV now as a backup:")
-                st.download_button(
-                    f"Download Tiering CSV ({len(tiering_df)} profiles, no messages)",
-                    data=tiering_csv,
-                    file_name=tier_fname,
-                    mime="text/csv",
-                    key="tiering_backup",
-                )
+                if not skip_tiering:
+                    # Only save tiering to Sheets for new batches (not backfills)
+                    tiering_df = build_results_dataframe(
+                        list(enriched.keys()), enriched, tiered, {}
+                    )
+                    st.session_state['results_df'] = tiering_df
+                    save_batch_to_history(tiering_df)
 
-                # Auto-save tiering to Google Sheets
-                ok, msg = save_batch_to_sheets(tiering_df, st.secrets, stage="tiering")
-                if ok:
-                    st.success(f"Tiering saved to Google Sheets: **{msg}**")
-                else:
-                    st.warning(f"Could not save to Sheets: {msg}")
+                    tiering_csv = dataframe_to_csv(tiering_df)
+                    tier_fname = f"stellar_tiering_{datetime.now().strftime('%Y%m%d_%H%M')}.csv"
+                    st.success("Enrichment + tiering saved. Download tiering-only CSV now as a backup:")
+                    st.download_button(
+                        f"Download Tiering CSV ({len(tiering_df)} profiles, no messages)",
+                        data=tiering_csv,
+                        file_name=tier_fname,
+                        mime="text/csv",
+                        key="tiering_backup",
+                    )
 
-                # ── Enrichment + tiering complete ─────────────────────
+                    ok, msg = save_batch_to_sheets(tiering_df, st.secrets, stage="tiering")
+                    if ok:
+                        st.success(f"Tiering saved to Google Sheets: **{msg}**")
+                    else:
+                        st.warning(f"Could not save to Sheets: {msg}")
+
+                # ── Ready for messaging ───────────────────────────────
                 elapsed = (datetime.now() - start_time).total_seconds()
                 st.info(
-                    f"Enrichment + tiering complete in **{elapsed/60:.1f} minutes**. "
+                    f"Enrichment complete in **{elapsed/60:.1f} minutes**. "
                     f"Click **Generate Messages** below when ready."
                 )
 
