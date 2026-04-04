@@ -150,7 +150,7 @@ if input_method == "Paste usernames":
         usernames = parse_input_usernames(text_input)
         st.info(f"Parsed **{len(usernames)}** usernames")
 
-else:
+elif input_method == "Upload CSV":
     uploaded = st.file_uploader(
         "Upload CSV with LinkedIn URLs",
         type=["csv"],
