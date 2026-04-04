@@ -138,39 +138,6 @@ def get_batches_needing_messages(streamlit_secrets):
         return []
 
 
-def update_sheet_tab(df, streamlit_secrets, tab_name):
-    """Update an existing tab in the Google Sheet with new data."""
-    client = _get_client(streamlit_secrets)
-    if client is None:
-        return False, "Not configured"
-
-    try:
-        sh = client.open_by_url(SHEET_URL)
-        ws = sh.worksheet(tab_name)
-
-        headers = df.columns.tolist()
-        rows = []
-        for _, row in df.iterrows():
-            row_data = []
-            for val in row:
-                s = str(val) if val is not None else ''
-                if len(s) > 5000:
-                    s = s[:5000] + '...'
-                row_data.append(s)
-            rows.append(row_data)
-
-        ws.clear()
-        ws.update('A1', [headers])
-        chunk_size = 50
-        for i in range(0, len(rows), chunk_size):
-            chunk = rows[i:i + chunk_size]
-            ws.update(f'A{i + 2}', chunk)
-
-        return True, tab_name
-    except Exception as e:
-        return False, f"{type(e).__name__}: {str(e)[:200]}"
-
-
 def get_batch_history(streamlit_secrets):
     """Get list of previous batch tabs from the Google Sheet.
 
