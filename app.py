@@ -273,6 +273,9 @@ if usernames:
                 )
                 st.session_state['results_df'] = tiering_df
                 st.session_state['pipeline_complete'] = True
+                st.session_state['_enriched'] = enriched
+                st.session_state['_tiered'] = tiered
+                st.session_state['_messaging_complete'] = False
                 save_batch_to_history(tiering_df)
 
                 tiering_csv = dataframe_to_csv(tiering_df)
@@ -340,6 +343,7 @@ if usernames:
                 )
                 st.session_state['results_df'] = df
                 st.session_state['pipeline_complete'] = True
+                st.session_state['_messaging_complete'] = True
                 save_batch_to_history(df)
 
                 # Auto-save full results to Google Sheets
@@ -375,6 +379,76 @@ if usernames:
 
 elif not st.session_state.get('pipeline_complete'):
     st.info("Enter LinkedIn usernames above to get started.")
+
+# ─── Resume Messaging Button ─────────────────────────────────────────────────
+# Shows when enrichment + tiering completed but messaging failed or was skipped
+
+if (st.session_state.get('_enriched') and st.session_state.get('_tiered')
+        and not st.session_state.get('_messaging_complete')):
+    enriched = st.session_state['_enriched']
+    tiered = st.session_state['_tiered']
+    eligible_count = sum(
+        1 for t in tiered.values()
+        if t.get('tier') != 'Out of Scope' and t.get('customer_exclusion_flag') != 'YES'
+    )
+
+    # Check if current results have empty messages
+    current_df = st.session_state.get('results_df')
+    has_messages = False
+    if current_df is not None:
+        has_messages = current_df['msg_connection_request'].str.strip().ne('').any()
+
+    if not has_messages and eligible_count > 0:
+        st.divider()
+        st.subheader("Resume Messaging")
+        st.info(
+            f"**{len(enriched)} profiles enriched and tiered** but messages are missing. "
+            f"Click below to generate messages for {eligible_count} eligible profiles "
+            f"without re-enriching."
+        )
+        if st.button(
+            f"Generate messages for {eligible_count} profiles",
+            type="primary",
+            key="resume_messaging",
+        ):
+            msg_progress = st.progress(0, text="Starting message generation...")
+
+            def msg_callback(current, total, username):
+                msg_progress.progress(
+                    current / total,
+                    text=f"Generating messages {current}/{total}...",
+                )
+
+            try:
+                messages = generate_messages(
+                    enriched, tiered, anthropic_key,
+                    progress_callback=msg_callback,
+                    max_workers=1,
+                )
+                msg_progress.progress(1.0, text="Message generation complete")
+                generated = sum(
+                    1 for m in messages.values()
+                    if m.get('msg_connection_request', '').strip()
+                    and not m['msg_connection_request'].startswith('[ERROR')
+                )
+                st.success(f"Generated messages for **{generated}/{eligible_count}** profiles")
+
+                # Rebuild results with messages
+                df = build_results_dataframe(
+                    list(enriched.keys()), enriched, tiered, messages
+                )
+                st.session_state['results_df'] = df
+                st.session_state['_messaging_complete'] = True
+                save_batch_to_history(df)
+
+                # Save to Google Sheets
+                ok, sheet_msg = save_batch_to_sheets(df, st.secrets, stage="full")
+                if ok:
+                    st.success(f"Saved to Google Sheets: **{sheet_msg}**")
+
+                st.rerun()
+            except Exception as e:
+                st.error(f"Messaging failed: {type(e).__name__}. Try again or reduce batch size.")
 
 
 # ─── Results (persisted via session_state) ───────────────────────────────────
