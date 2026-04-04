@@ -107,10 +107,12 @@ def get_batches_needing_messages(streamlit_secrets):
                     continue
 
                 # Check for eligible profiles missing messages
+                # Sheets may return tier as int or string
                 msg_col = 'msg_connection_request'
+                df['tier'] = df['tier'].astype(str)
                 eligible = df[
                     df['tier'].isin(['1', '2', '3'])
-                    & (df.get('customer_exclusion_flag', pd.Series(dtype=str)) != 'YES')
+                    & (df.get('customer_exclusion_flag', pd.Series(dtype=str)).astype(str) != 'YES')
                 ]
 
                 if msg_col in df.columns:

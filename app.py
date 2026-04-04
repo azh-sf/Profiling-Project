@@ -208,9 +208,10 @@ elif input_method == "Backfill messages from Sheets":
             # Extract usernames for profiles needing messages
             from utils import clean_linkedin_username
             msg_col = 'msg_connection_request'
+            prev_df['tier'] = prev_df['tier'].astype(str)
             eligible_mask = (
                 prev_df['tier'].isin(['1', '2', '3'])
-                & (prev_df.get('customer_exclusion_flag', pd.Series(dtype=str)) != 'YES')
+                & (prev_df.get('customer_exclusion_flag', pd.Series(dtype=str)).astype(str) != 'YES')
             )
             if msg_col in prev_df.columns:
                 missing_mask = eligible_mask & prev_df[msg_col].fillna('').str.strip().eq('')
