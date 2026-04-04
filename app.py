@@ -296,82 +296,11 @@ if usernames:
                 else:
                     st.warning(f"Could not save to Sheets: {msg}")
 
-                # ── Stage 3: Messaging ───────────────────────────────
-                messages = {}
-                if generate_msgs:
-                    eligible_count = sum(
-                        1 for t in tiered.values()
-                        if t.get('tier') != 'Out of Scope'
-                        and t.get('customer_exclusion_flag') != 'YES'
-                    )
-                    st.subheader(
-                        f"Stage 3: Generating messages for {eligible_count} "
-                        f"eligible profiles (sequential — reliable)"
-                    )
-                    msg_progress = st.progress(0, text="Starting message generation...")
-
-                    def msg_callback(current, total, username):
-                        msg_progress.progress(
-                            current / total,
-                            text=f"Generating messages {current}/{total}...",
-                        )
-
-                    try:
-                        messages = generate_messages(
-                            enriched, tiered, anthropic_key,
-                            progress_callback=msg_callback,
-                            max_workers=1,  # Sequential — most reliable
-                        )
-                        msg_progress.progress(1.0, text="Message generation complete")
-                        generated = sum(
-                            1 for m in messages.values()
-                            if m.get('msg_connection_request', '').strip()
-                            and not m['msg_connection_request'].startswith('[ERROR')
-                        )
-                        st.success(f"Generated messages for **{generated}/{eligible_count}** profiles")
-                    except Exception as e:
-                        st.error(
-                            f"Messaging failed at some point: {type(e).__name__}. "
-                            f"Partial results saved. Download the tiering CSV above."
-                        )
-
-                # ── Final save with messages ──────────────────────────
+                # ── Enrichment + tiering complete ─────────────────────
                 elapsed = (datetime.now() - start_time).total_seconds()
-
-                df = build_results_dataframe(
-                    list(enriched.keys()), enriched, tiered, messages
-                )
-                st.session_state['results_df'] = df
-                st.session_state['pipeline_complete'] = True
-                st.session_state['_messaging_complete'] = True
-                save_batch_to_history(df)
-
-                # Auto-save full results to Google Sheets
-                ok, msg = save_batch_to_sheets(df, st.secrets, stage="full")
-                if ok:
-                    st.success(f"Full results saved to Google Sheets: **{msg}**")
-                else:
-                    st.warning(f"Could not save to Sheets: {msg}")
-
-                # ── Prominent download banner ────────────────────────
-                st.divider()
-                st.markdown(
-                    f"### Pipeline complete — {len(enriched)} profiles processed "
-                    f"in {elapsed/60:.1f} minutes"
-                )
                 st.info(
-                    "Results auto-saved to **Google Sheets**. "
-                    "You can also download the CSV below."
-                )
-                csv_data = dataframe_to_csv(df)
-                fname = f"stellar_outreach_{datetime.now().strftime('%Y%m%d_%H%M')}.csv"
-                st.download_button(
-                    f"Download Full CSV ({len(df)} profiles)",
-                    data=csv_data,
-                    file_name=fname,
-                    mime="text/csv",
-                    type="primary",
-                    key="immediate_download",
+                    f"Enrichment + tiering complete in **{elapsed/60:.1f} minutes**. "
+                    f"Click **Generate Messages** below when ready."
                 )
 
             else:
@@ -399,12 +328,13 @@ if (st.session_state.get('_enriched') and st.session_state.get('_tiered')
         has_messages = current_df['msg_connection_request'].str.strip().ne('').any()
 
     if not has_messages and eligible_count > 0:
+        est_mins = int(eligible_count * 7 / 60) + 1  # ~7s per profile
         st.divider()
-        st.subheader("Resume Messaging")
+        st.subheader("Generate Messages")
         st.info(
-            f"**{len(enriched)} profiles enriched and tiered** but messages are missing. "
-            f"Click below to generate messages for {eligible_count} eligible profiles "
-            f"without re-enriching."
+            f"**{len(enriched)} profiles enriched and tiered.** "
+            f"Click below to generate messages for **{eligible_count} eligible profiles**. "
+            f"Estimated time: **~{est_mins} minutes**."
         )
         if st.button(
             f"Generate messages for {eligible_count} profiles",
