@@ -17,7 +17,7 @@ MESSAGE_KEYS = list(EMPTY_MESSAGES.keys())
 # Model configs
 MODELS = {
     "Claude Opus 4.6": {"provider": "anthropic", "model_id": "claude-opus-4-6", "cost_per_profile": "$0.08-0.10"},
-    "Claude Sonnet 4.6": {"provider": "anthropic", "model_id": "claude-sonnet-4-6-20250514", "cost_per_profile": "$0.05-0.06"},
+    "Claude Sonnet 4.6": {"provider": "anthropic", "model_id": "claude-sonnet-4-6", "cost_per_profile": "$0.05-0.06"},
     "Gemini 2.5 Pro": {"provider": "google", "model_id": "gemini-2.5-pro", "cost_per_profile": "$0.03-0.04"},
 }
 
