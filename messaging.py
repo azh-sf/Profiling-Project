@@ -59,14 +59,26 @@ def _call_anthropic(user_prompt, api_key, model_id):
 def _call_google(user_prompt, api_key, model_id):
     """Call Gemini API."""
     from google import genai
+    from google.genai import types
     client = genai.Client(api_key=api_key)
-    # Gemini uses system_instruction instead of system message
-    full_prompt = f"{SYSTEM_PROMPT}\n\n---\n\n{user_prompt}"
+
     response = client.models.generate_content(
         model=model_id,
-        contents=full_prompt,
+        contents=f"{SYSTEM_PROMPT}\n\n---\n\n{user_prompt}",
+        config=types.GenerateContentConfig(
+            response_mime_type="application/json",
+        ),
     )
-    return response.text.strip()
+
+    # Handle blocked/empty responses
+    if not response.candidates:
+        raise ValueError("No candidates returned — response may have been blocked")
+
+    candidate = response.candidates[0]
+    if not candidate.content or not candidate.content.parts:
+        raise ValueError("Empty response content")
+
+    return candidate.content.parts[0].text.strip()
 
 
 def generate_messages_for_profile(
