@@ -181,6 +181,14 @@ if usernames:
         for e in errors:
             st.error(e)
     else:
+        # Warn if previous results exist and haven't been cleared
+        if st.session_state.get('pipeline_complete'):
+            st.warning(
+                "You have results from a previous batch. Make sure you've "
+                "**downloaded the CSV** before processing a new batch — "
+                "previous results will be overwritten."
+            )
+
         if st.button(
             f"Process {len(usernames)} profiles",
             type="primary",
@@ -285,7 +293,6 @@ if usernames:
 
                 # ── Finish — always save results even if messaging partially failed ──
                 elapsed = (datetime.now() - start_time).total_seconds()
-                st.info(f"Pipeline complete in **{elapsed/60:.1f} minutes** ({len(enriched)} profiles)")
 
                 df = build_results_dataframe(
                     list(enriched.keys()), enriched, tiered, messages
@@ -293,6 +300,27 @@ if usernames:
                 st.session_state['results_df'] = df
                 st.session_state['pipeline_complete'] = True
                 save_batch_to_history(df)
+
+                # ── Prominent download banner ────────────────────────
+                st.divider()
+                st.markdown(
+                    f"### Pipeline complete — {len(enriched)} profiles processed "
+                    f"in {elapsed/60:.1f} minutes"
+                )
+                st.warning(
+                    "**Download your CSV now.** Results are lost if you close this tab "
+                    "or start a new batch without downloading."
+                )
+                csv_data = dataframe_to_csv(df)
+                fname = f"stellar_outreach_{datetime.now().strftime('%Y%m%d_%H%M')}.csv"
+                st.download_button(
+                    f"Download Full CSV ({len(df)} profiles)",
+                    data=csv_data,
+                    file_name=fname,
+                    mime="text/csv",
+                    type="primary",
+                    key="immediate_download",
+                )
 
             else:
                 st.warning("No profiles enriched. Check your Apify token and usernames.")
