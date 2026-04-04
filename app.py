@@ -327,58 +327,160 @@ if (st.session_state.get('_enriched') and st.session_state.get('_tiered')
     if current_df is not None:
         has_messages = current_df['msg_connection_request'].str.strip().ne('').any()
 
-    if not has_messages and eligible_count > 0:
-        est_mins = int(eligible_count * 7 / 60) + 1  # ~7s per profile
+    # Count how many already have messages (from previous partial runs)
+    existing_messages = st.session_state.get('_messages', {})
+    already_done = sum(
+        1 for u, m in existing_messages.items()
+        if m.get('msg_connection_request', '').strip()
+        and not m['msg_connection_request'].startswith('[ERROR')
+    )
+    remaining = eligible_count - already_done
+
+    if remaining > 0:
+        est_mins = int(remaining * 7 / 60) + 1
         st.divider()
         st.subheader("Generate Messages")
+        if already_done > 0:
+            st.success(f"**{already_done}/{eligible_count}** messages already generated from previous run.")
         st.info(
-            f"**{len(enriched)} profiles enriched and tiered.** "
-            f"Click below to generate messages for **{eligible_count} eligible profiles**. "
-            f"Estimated time: **~{est_mins} minutes**."
+            f"**{remaining} messages remaining.** "
+            f"Estimated time: **~{est_mins} minutes**. "
+            f"Progress is saved every 25 profiles — if it times out, click the button again to continue."
         )
         if st.button(
-            f"Generate messages for {eligible_count} profiles",
+            f"Generate messages ({remaining} remaining)",
             type="primary",
             key="resume_messaging",
         ):
-            msg_progress = st.progress(0, text="Starting message generation...")
+            CHUNK_SIZE = 25
 
-            def msg_callback(current, total, username):
-                msg_progress.progress(
-                    current / total,
-                    text=f"Generating messages {current}/{total}...",
-                )
+            # Get eligible profiles that haven't been messaged yet
+            eligible = {
+                u: t for u, t in tiered.items()
+                if t.get('tier') != 'Out of Scope'
+                and t.get('customer_exclusion_flag') != 'YES'
+                and u not in existing_messages
+            }
+            # Also include ones that errored
+            for u, m in existing_messages.items():
+                if m.get('msg_connection_request', '').startswith('[ERROR'):
+                    if u in tiered:
+                        eligible[u] = tiered[u]
 
-            try:
-                messages = generate_messages(
-                    enriched, tiered, anthropic_key,
-                    progress_callback=msg_callback,
-                    max_workers=1,
-                )
-                msg_progress.progress(1.0, text="Message generation complete")
-                generated = sum(
-                    1 for m in messages.values()
-                    if m.get('msg_connection_request', '').strip()
-                    and not m['msg_connection_request'].startswith('[ERROR')
-                )
-                st.success(f"Generated messages for **{generated}/{eligible_count}** profiles")
+            eligible_list = list(eligible.items())
+            total_to_do = len(eligible_list)
+            done_so_far = 0
 
-                # Rebuild results with messages
-                df = build_results_dataframe(
-                    list(enriched.keys()), enriched, tiered, messages
-                )
-                st.session_state['results_df'] = df
+            msg_progress = st.progress(0, text=f"Generating messages 0/{total_to_do}...")
+            msg_status = st.empty()
+
+            # Process in chunks — save after each chunk
+            for chunk_start in range(0, total_to_do, CHUNK_SIZE):
+                chunk = dict(eligible_list[chunk_start:chunk_start + CHUNK_SIZE])
+                chunk_num = chunk_start // CHUNK_SIZE + 1
+                total_chunks = (total_to_do + CHUNK_SIZE - 1) // CHUNK_SIZE
+
+                msg_status.text(f"Chunk {chunk_num}/{total_chunks} ({len(chunk)} profiles)...")
+
+                try:
+                    def msg_callback(current, total, username):
+                        overall = done_so_far + current
+                        msg_progress.progress(
+                            min(overall / total_to_do, 1.0),
+                            text=f"Generating messages {overall}/{total_to_do}...",
+                        )
+
+                    chunk_messages = generate_messages(
+                        enriched, chunk, anthropic_key,
+                        progress_callback=msg_callback,
+                        max_workers=1,
+                    )
+
+                    # Merge into existing messages
+                    existing_messages.update(chunk_messages)
+                    st.session_state['_messages'] = existing_messages
+                    done_so_far += len(chunk)
+
+                    # Save progress after each chunk
+                    all_messages = {**existing_messages}
+                    # Fill in empty messages for skipped profiles
+                    for u in tiered:
+                        if u not in all_messages:
+                            all_messages[u] = {
+                                'msg_connection_request': '',
+                                'msg_follow_up_accepted': '',
+                                'msg_reengage_previous': '',
+                                'msg_reengage_cold': '',
+                                'msg_email_detailed': '',
+                                'msg_email_forwardable': '',
+                            }
+
+                    df = build_results_dataframe(
+                        list(enriched.keys()), enriched, tiered, all_messages
+                    )
+                    st.session_state['results_df'] = df
+                    st.session_state['pipeline_complete'] = True
+
+                    # Save chunk progress to Sheets
+                    generated_count = sum(
+                        1 for m in existing_messages.values()
+                        if m.get('msg_connection_request', '').strip()
+                        and not m['msg_connection_request'].startswith('[ERROR')
+                    )
+                    msg_status.text(
+                        f"Chunk {chunk_num} done. "
+                        f"{generated_count}/{eligible_count} messages complete. Saving..."
+                    )
+
+                except Exception as e:
+                    st.warning(
+                        f"Chunk {chunk_num} failed: {type(e).__name__}. "
+                        f"Progress saved. Click the button again to continue from where you left off."
+                    )
+                    break
+
+            # Final save
+            msg_progress.progress(1.0, text="Message generation complete")
+
+            all_messages = st.session_state.get('_messages', {})
+            for u in tiered:
+                if u not in all_messages:
+                    all_messages[u] = {
+                        'msg_connection_request': '',
+                        'msg_follow_up_accepted': '',
+                        'msg_reengage_previous': '',
+                        'msg_reengage_cold': '',
+                        'msg_email_detailed': '',
+                        'msg_email_forwardable': '',
+                    }
+
+            df = build_results_dataframe(
+                list(enriched.keys()), enriched, tiered, all_messages
+            )
+            st.session_state['results_df'] = df
+            st.session_state['pipeline_complete'] = True
+
+            generated_total = sum(
+                1 for m in all_messages.values()
+                if m.get('msg_connection_request', '').strip()
+                and not m['msg_connection_request'].startswith('[ERROR')
+            )
+
+            if generated_total >= eligible_count:
                 st.session_state['_messaging_complete'] = True
-                save_batch_to_history(df)
 
-                # Save to Google Sheets
-                ok, sheet_msg = save_batch_to_sheets(df, st.secrets, stage="full")
-                if ok:
-                    st.success(f"Saved to Google Sheets: **{sheet_msg}**")
+            save_batch_to_history(df)
 
-                st.rerun()
-            except Exception as e:
-                st.error(f"Messaging failed: {type(e).__name__}. Try again or reduce batch size.")
+            # Save to Google Sheets
+            ok, sheet_msg = save_batch_to_sheets(df, st.secrets, stage="full")
+            if ok:
+                st.success(f"Saved to Google Sheets: **{sheet_msg}**")
+
+            st.success(f"**{generated_total}/{eligible_count}** messages generated.")
+            if generated_total < eligible_count:
+                st.info("Some messages remaining. Click the button again to continue.")
+
+            st.rerun()
 
 
 # ─── Results (persisted via session_state) ───────────────────────────────────
