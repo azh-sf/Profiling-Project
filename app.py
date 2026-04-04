@@ -278,6 +278,13 @@ if usernames:
             type="primary",
             help=f"Enriches, tiers, and generates messages for all {len(usernames)} profiles",
         ):
+            # Clear ALL stale session state from previous runs
+            for key in ['_enriched', '_tiered', '_messages', '_messaging_complete',
+                        '_sheets_tab', '_prev_batch_tab', '_prev_batch_df',
+                        '_rerun_mode', '_skip_tiering', '_msg_progress_tab',
+                        'results_df', 'pipeline_complete']:
+                st.session_state.pop(key, None)
+
             start_time = datetime.now()
 
             # ── Stage 1: Enrichment ──────────────────────────────────
@@ -540,17 +547,21 @@ if (st.session_state.get('_enriched') and st.session_state.get('_tiered')
                         and not m['msg_connection_request'].startswith('[ERROR')
                     )
 
-                    # Update the ORIGINAL Sheets tab in-place
+                    # Save chunk progress to Sheets
                     from sheets import update_sheet_tab
-                    target_tab = st.session_state.get('_prev_batch_tab') or st.session_state.get('_sheets_tab')
                     ok = False
-                    if target_tab:
-                        ok, _ = update_sheet_tab(df, st.secrets, target_tab)
+
+                    if st.session_state.get('_rerun_mode') and st.session_state.get('_prev_batch_tab'):
+                        # Backfill mode: update the ORIGINAL tab in-place
+                        ok, _ = update_sheet_tab(df, st.secrets, st.session_state['_prev_batch_tab'])
+                    elif st.session_state.get('_sheets_tab'):
+                        # Normal mode: update THIS run's tab
+                        ok, _ = update_sheet_tab(df, st.secrets, st.session_state['_sheets_tab'])
 
                     msg_status.text(
                         f"Chunk {chunk_num}/{total_chunks} done. "
                         f"{generated_count}/{eligible_count} messages. "
-                        f"{'Updated in Sheets.' if ok else 'Sheets not updated.'}"
+                        f"{'Saved to Sheets.' if ok else 'Sheets not updated.'}"
                     )
 
                 except Exception as e:
@@ -631,13 +642,18 @@ if (st.session_state.get('_enriched') and st.session_state.get('_tiered')
 
             save_batch_to_history(df)
 
-            # Final update to the original Sheets tab
+            # Final save to Sheets
             from sheets import update_sheet_tab
-            target_tab = st.session_state.get('_prev_batch_tab') or st.session_state.get('_sheets_tab')
-            if target_tab:
-                ok, _ = update_sheet_tab(df, st.secrets, target_tab)
+            if st.session_state.get('_rerun_mode') and st.session_state.get('_prev_batch_tab'):
+                # Backfill: update original tab
+                ok, _ = update_sheet_tab(df, st.secrets, st.session_state['_prev_batch_tab'])
                 if ok:
-                    st.success(f"Google Sheet updated: **{target_tab}**")
+                    st.success(f"Google Sheet updated: **{st.session_state['_prev_batch_tab']}**")
+            elif st.session_state.get('_sheets_tab'):
+                # Normal run: update this run's tab
+                ok, _ = update_sheet_tab(df, st.secrets, st.session_state['_sheets_tab'])
+                if ok:
+                    st.success(f"Google Sheet updated: **{st.session_state['_sheets_tab']}**")
 
             st.success(f"**{generated_total}/{eligible_count}** messages generated.")
             if generated_total < eligible_count:
