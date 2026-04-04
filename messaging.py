@@ -1,6 +1,7 @@
 """Message generation using Claude Opus 4.6 via Anthropic API."""
 
 import json
+import time
 import anthropic
 from prompts import SYSTEM_PROMPT, build_user_prompt
 
@@ -23,13 +24,7 @@ def generate_messages_for_profile(
 ) -> dict:
     """Generate 6 personalised messages for a single profile.
 
-    Args:
-        profile: Full Apify profile dict
-        tier_data: Tier result dict from tiering.py
-        api_key: Anthropic API key
-
-    Returns:
-        Dict with 6 message keys, or empty messages on failure.
+    Includes retry logic for rate limits and transient errors.
     """
     # Skip profiles that shouldn't receive messages
     if tier_data.get('tier') == 'Out of Scope':
@@ -40,39 +35,63 @@ def generate_messages_for_profile(
     client = anthropic.Anthropic(api_key=api_key)
     user_prompt = build_user_prompt(profile, tier_data)
 
-    try:
-        response = client.messages.create(
-            model=MODEL,
-            max_tokens=4096,
-            system=SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": user_prompt}],
-        )
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            response = client.messages.create(
+                model=MODEL,
+                max_tokens=4096,
+                system=SYSTEM_PROMPT,
+                messages=[{"role": "user", "content": user_prompt}],
+            )
 
-        raw_text = response.content[0].text.strip()
+            raw_text = response.content[0].text.strip()
 
-        # Strip markdown fences if present
-        if raw_text.startswith("```"):
-            raw_text = raw_text.split("\n", 1)[1] if "\n" in raw_text else raw_text[3:]
-        if raw_text.endswith("```"):
-            raw_text = raw_text[:-3]
-        raw_text = raw_text.strip()
+            # Strip markdown fences if present
+            if raw_text.startswith("```"):
+                raw_text = raw_text.split("\n", 1)[1] if "\n" in raw_text else raw_text[3:]
+            if raw_text.endswith("```"):
+                raw_text = raw_text[:-3]
+            raw_text = raw_text.strip()
 
-        messages = json.loads(raw_text)
+            messages = json.loads(raw_text)
 
-        # Validate all keys present
-        result = {}
-        for key in MESSAGE_KEYS:
-            result[key] = messages.get(key, "")
+            # Validate all keys present
+            result = {}
+            for key in MESSAGE_KEYS:
+                result[key] = messages.get(key, "")
 
-        # Enforce connection request length
-        cr = result["msg_connection_request"]
-        if len(cr) > 300:
-            result["msg_connection_request"] = cr[:297] + "..."
+            # Enforce connection request length
+            cr = result["msg_connection_request"]
+            if len(cr) > 300:
+                result["msg_connection_request"] = cr[:297] + "..."
 
-        return result
+            return result
 
-    except Exception as e:
-        return {**EMPTY_MESSAGES, "msg_connection_request": f"[ERROR: {type(e).__name__}: {str(e)[:100]}]"}
+        except anthropic.RateLimitError:
+            # Rate limited — back off and retry
+            wait = 15 * (attempt + 1)
+            time.sleep(wait)
+            continue
+        except anthropic.APIStatusError as e:
+            if e.status_code in (529, 500, 502, 503):
+                # Overloaded or server error — back off and retry
+                time.sleep(10 * (attempt + 1))
+                continue
+            return {**EMPTY_MESSAGES, "msg_connection_request": f"[ERROR: API {e.status_code}]"}
+        except json.JSONDecodeError:
+            # Claude returned non-JSON — retry once
+            if attempt < max_retries - 1:
+                time.sleep(3)
+                continue
+            return {**EMPTY_MESSAGES, "msg_connection_request": "[ERROR: invalid JSON response]"}
+        except Exception as e:
+            if attempt < max_retries - 1:
+                time.sleep(5)
+                continue
+            return {**EMPTY_MESSAGES, "msg_connection_request": f"[ERROR: {type(e).__name__}]"}
+
+    return {**EMPTY_MESSAGES, "msg_connection_request": "[ERROR: max retries exceeded]"}
 
 
 def generate_messages(
@@ -80,25 +99,23 @@ def generate_messages(
     tiered: dict,
     api_key: str,
     progress_callback=None,
-    max_workers: int = 3,
+    max_workers: int = 1,
 ) -> dict:
-    """Generate messages for all tiered profiles with parallel execution.
+    """Generate messages for all tiered profiles.
 
-    Runs up to max_workers concurrent Claude API calls for speed.
-    Same per-profile quality — just faster.
+    Sequential processing with retry logic — reliable for large batches.
+    Saves results incrementally so partial results are never lost.
 
     Args:
         enriched: {username: apify_profile_dict}
         tiered: {username: tier_result_dict}
         api_key: Anthropic API key
         progress_callback: Optional callable(current, total, username)
-        max_workers: Max concurrent Claude API calls (default 3)
+        max_workers: Ignored — kept for API compatibility. Always sequential.
 
     Returns:
         {username: message_dict}
     """
-    from concurrent.futures import ThreadPoolExecutor, as_completed
-
     results = {}
     # Only generate for profiles that passed tiering
     eligible = {
@@ -117,32 +134,22 @@ def generate_messages(
 
     done_count = 0
 
-    import time as _time
-
-    def _generate_one(username, tier_data):
+    for username, tier_data in eligible.items():
         profile = enriched.get(username, {})
-        return username, generate_messages_for_profile(profile, tier_data, api_key)
+        try:
+            msgs = generate_messages_for_profile(profile, tier_data, api_key)
+            results[username] = msgs
+        except Exception:
+            results[username] = {
+                **EMPTY_MESSAGES,
+                "msg_connection_request": "[ERROR: generation failed]",
+            }
 
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = {}
-        for i, (u, t) in enumerate(eligible.items()):
-            # Stagger to stay within API rate limits
-            if i > 0 and i % max_workers == 0:
-                _time.sleep(2)
-            futures[executor.submit(_generate_one, u, t)] = u
-        for future in as_completed(futures):
-            username = futures[future]
-            try:
-                uname, msgs = future.result()
-                results[uname] = msgs
-            except Exception:
-                results[username] = {
-                    **EMPTY_MESSAGES,
-                    "msg_connection_request": "[ERROR: generation failed]",
-                }
+        done_count += 1
+        if progress_callback:
+            progress_callback(done_count, total, username)
 
-            done_count += 1
-            if progress_callback:
-                progress_callback(done_count, total, username)
+        # Small delay between calls to stay within rate limits
+        time.sleep(1)
 
     return results

@@ -254,10 +254,25 @@ if usernames:
                 )
                 cols[4].metric("Customers", cust_count)
 
-                # ── Checkpoint: save enrichment + tiering before messaging ──
-                # This ensures we never lose enrichment/tiering work if messaging crashes
-                st.session_state['_enriched'] = enriched
-                st.session_state['_tiered'] = tiered
+                # ── AUTO-SAVE: tiering CSV before messaging ─────────────
+                # This ensures enrichment + tiering is NEVER lost
+                tiering_df = build_results_dataframe(
+                    list(enriched.keys()), enriched, tiered, {}
+                )
+                st.session_state['results_df'] = tiering_df
+                st.session_state['pipeline_complete'] = True
+                save_batch_to_history(tiering_df)
+
+                tiering_csv = dataframe_to_csv(tiering_df)
+                tier_fname = f"stellar_tiering_{datetime.now().strftime('%Y%m%d_%H%M')}.csv"
+                st.success("Enrichment + tiering saved. Download tiering-only CSV now as a backup:")
+                st.download_button(
+                    f"Download Tiering CSV ({len(tiering_df)} profiles, no messages)",
+                    data=tiering_csv,
+                    file_name=tier_fname,
+                    mime="text/csv",
+                    key="tiering_backup",
+                )
 
                 # ── Stage 3: Messaging ───────────────────────────────
                 messages = {}
@@ -269,7 +284,7 @@ if usernames:
                     )
                     st.subheader(
                         f"Stage 3: Generating messages for {eligible_count} "
-                        f"eligible profiles (2 parallel workers)"
+                        f"eligible profiles (sequential — reliable)"
                     )
                     msg_progress = st.progress(0, text="Starting message generation...")
 
@@ -283,15 +298,22 @@ if usernames:
                         messages = generate_messages(
                             enriched, tiered, anthropic_key,
                             progress_callback=msg_callback,
-                            max_workers=2,
+                            max_workers=1,  # Sequential — most reliable
                         )
                         msg_progress.progress(1.0, text="Message generation complete")
-                        generated = sum(1 for m in messages.values() if m.get('msg_connection_request', '').strip() and not m['msg_connection_request'].startswith('[ERROR'))
+                        generated = sum(
+                            1 for m in messages.values()
+                            if m.get('msg_connection_request', '').strip()
+                            and not m['msg_connection_request'].startswith('[ERROR')
+                        )
                         st.success(f"Generated messages for **{generated}/{eligible_count}** profiles")
                     except Exception as e:
-                        st.error(f"Messaging failed: {type(e).__name__}. Saving tiering results without messages.")
+                        st.error(
+                            f"Messaging failed at some point: {type(e).__name__}. "
+                            f"Partial results saved. Download the tiering CSV above."
+                        )
 
-                # ── Finish — always save results even if messaging partially failed ──
+                # ── Final save with messages ──────────────────────────
                 elapsed = (datetime.now() - start_time).total_seconds()
 
                 df = build_results_dataframe(
