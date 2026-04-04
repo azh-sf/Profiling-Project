@@ -521,9 +521,24 @@ if (st.session_state.get('_enriched') and st.session_state.get('_tiered')
                         if m.get('msg_connection_request', '').strip()
                         and not m['msg_connection_request'].startswith('[ERROR')
                     )
+
+                    # Write progress to Google Sheets (update same tab)
+                    from sheets import update_sheet_tab
+                    progress_tab = st.session_state.get('_msg_progress_tab')
+                    if progress_tab:
+                        ok, _ = update_sheet_tab(df, st.secrets, progress_tab)
+                    else:
+                        # First chunk — create the tab
+                        from datetime import datetime as _dt
+                        tab_label = _dt.now().strftime('%d-%b %H:%M') + f" messages ({eligible_count})"
+                        ok, tab_name = save_batch_to_sheets(df, st.secrets, stage=f"msgs-progress")
+                        if ok:
+                            st.session_state['_msg_progress_tab'] = tab_name
+
                     msg_status.text(
-                        f"Chunk {chunk_num} done. "
-                        f"{generated_count}/{eligible_count} messages complete. Saving..."
+                        f"Chunk {chunk_num}/{total_chunks} done. "
+                        f"{generated_count}/{eligible_count} messages. "
+                        f"{'Saved to Sheets.' if ok else 'Sheets save failed.'}"
                     )
 
                 except Exception as e:
