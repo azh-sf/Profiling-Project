@@ -1,9 +1,6 @@
 """Apify LinkedIn profile enrichment using the Full Sections scraper."""
 
-from __future__ import annotations
-
 import time
-from typing import Optional
 import requests
 
 ACTOR_ID = "VhxlqQXRwhW8H5hNV"

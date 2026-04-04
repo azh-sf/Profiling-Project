@@ -1,11 +1,8 @@
 """Utility functions for LinkedIn URL cleaning, CSV parsing, and data helpers."""
 
-from __future__ import annotations
-
 import re
 import csv
 import io
-from typing import List, Tuple
 import pandas as pd
 
 
