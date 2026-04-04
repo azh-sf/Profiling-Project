@@ -384,11 +384,12 @@ if usernames:
                         key="tiering_backup",
                     )
 
-                    ok, msg = save_batch_to_sheets(tiering_df, st.secrets, stage="tiering")
+                    ok, tab_name = save_batch_to_sheets(tiering_df, st.secrets, stage="tiering")
                     if ok:
-                        st.success(f"Tiering saved to Google Sheets: **{msg}**")
+                        st.session_state['_sheets_tab'] = tab_name
+                        st.success(f"Tiering saved to Google Sheets: **{tab_name}**")
                     else:
-                        st.warning(f"Could not save to Sheets: {msg}")
+                        st.warning(f"Could not save to Sheets: {tab_name}")
 
                 # ── Ready for messaging ───────────────────────────────
                 elapsed = (datetime.now() - start_time).total_seconds()
@@ -522,23 +523,17 @@ if (st.session_state.get('_enriched') and st.session_state.get('_tiered')
                         and not m['msg_connection_request'].startswith('[ERROR')
                     )
 
-                    # Write progress to Google Sheets (update same tab)
+                    # Update the ORIGINAL Sheets tab in-place
                     from sheets import update_sheet_tab
-                    progress_tab = st.session_state.get('_msg_progress_tab')
-                    if progress_tab:
-                        ok, _ = update_sheet_tab(df, st.secrets, progress_tab)
-                    else:
-                        # First chunk — create the tab
-                        from datetime import datetime as _dt
-                        tab_label = _dt.now().strftime('%d-%b %H:%M') + f" messages ({eligible_count})"
-                        ok, tab_name = save_batch_to_sheets(df, st.secrets, stage=f"msgs-progress")
-                        if ok:
-                            st.session_state['_msg_progress_tab'] = tab_name
+                    target_tab = st.session_state.get('_prev_batch_tab') or st.session_state.get('_sheets_tab')
+                    ok = False
+                    if target_tab:
+                        ok, _ = update_sheet_tab(df, st.secrets, target_tab)
 
                     msg_status.text(
                         f"Chunk {chunk_num}/{total_chunks} done. "
                         f"{generated_count}/{eligible_count} messages. "
-                        f"{'Saved to Sheets.' if ok else 'Sheets save failed.'}"
+                        f"{'Updated in Sheets.' if ok else 'Sheets not updated.'}"
                     )
 
                 except Exception as e:
@@ -614,10 +609,13 @@ if (st.session_state.get('_enriched') and st.session_state.get('_tiered')
 
             save_batch_to_history(df)
 
-            # Save to Google Sheets
-            ok, sheet_msg = save_batch_to_sheets(df, st.secrets, stage="full")
-            if ok:
-                st.success(f"Saved to Google Sheets: **{sheet_msg}**")
+            # Final update to the original Sheets tab
+            from sheets import update_sheet_tab
+            target_tab = st.session_state.get('_prev_batch_tab') or st.session_state.get('_sheets_tab')
+            if target_tab:
+                ok, _ = update_sheet_tab(df, st.secrets, target_tab)
+                if ok:
+                    st.success(f"Google Sheet updated: **{target_tab}**")
 
             st.success(f"**{generated_total}/{eligible_count}** messages generated.")
             if generated_total < eligible_count:
