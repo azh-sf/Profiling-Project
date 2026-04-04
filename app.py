@@ -227,7 +227,8 @@ elif input_method == "Backfill messages from Sheets":
                 & (prev_df.get('customer_exclusion_flag', pd.Series(dtype=str)).astype(str) != 'YES')
             )
             if msg_col in prev_df.columns:
-                missing_mask = eligible_mask & prev_df[msg_col].fillna('').str.strip().eq('')
+                msg_vals = prev_df[msg_col].fillna('').astype(str).str.strip()
+                missing_mask = eligible_mask & (msg_vals.eq('') | msg_vals.str.startswith('[ERROR'))
             else:
                 missing_mask = eligible_mask
 
@@ -433,7 +434,8 @@ if (st.session_state.get('_enriched') and st.session_state.get('_tiered')
     current_df = st.session_state.get('results_df')
     has_messages = False
     if current_df is not None:
-        has_messages = current_df['msg_connection_request'].str.strip().ne('').any()
+        msg_vals = current_df['msg_connection_request'].fillna('').astype(str).str.strip()
+        has_messages = (msg_vals.ne('') & ~msg_vals.str.startswith('[ERROR')).any()
 
     # Count how many already have messages (from previous partial runs)
     existing_messages = st.session_state.get('_messages', {})
@@ -597,7 +599,7 @@ if (st.session_state.get('_enriched') and st.session_state.get('_tiered')
                     'msg_reengage_previous', 'msg_reengage_cold',
                     'msg_email_detailed', 'msg_email_forwardable',
                 ]
-                # Merge on linkedin_url
+                # Merge on linkedin_url — overwrite empty and error values
                 for _, new_row in df.iterrows():
                     url = new_row.get('linkedin_url', '')
                     if not url:
@@ -605,8 +607,13 @@ if (st.session_state.get('_enriched') and st.session_state.get('_tiered')
                     mask = prev_df['linkedin_url'] == url
                     if mask.any():
                         for col in msg_cols:
-                            new_val = new_row.get(col, '')
-                            if new_val and str(new_val).strip():
+                            new_val = str(new_row.get(col, '')).strip()
+                            old_val = str(prev_df.loc[mask, col].iloc[0]).strip() if mask.any() else ''
+                            # Overwrite if new value is real content (not empty, not error)
+                            if new_val and not new_val.startswith('[ERROR'):
+                                prev_df.loc[mask, col] = new_val
+                            # Also overwrite old errors with new content
+                            elif old_val.startswith('[ERROR') and new_val:
                                 prev_df.loc[mask, col] = new_val
 
                 df = prev_df

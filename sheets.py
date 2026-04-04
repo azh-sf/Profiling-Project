@@ -116,7 +116,8 @@ def get_batches_needing_messages(streamlit_secrets):
                 ]
 
                 if msg_col in df.columns:
-                    missing = eligible[eligible[msg_col].fillna('').str.strip().eq('')]
+                    msg_vals = eligible[msg_col].fillna('').astype(str).str.strip()
+                    missing = eligible[msg_vals.eq('') | msg_vals.str.startswith('[ERROR')]
                 else:
                     missing = eligible
 
