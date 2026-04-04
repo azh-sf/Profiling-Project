@@ -94,7 +94,8 @@ def enrich_profiles(
     """Enrich multiple LinkedIn profiles with parallel execution.
 
     Runs up to max_workers concurrent Apify actor calls for speed,
-    while keeping the same per-profile quality.
+    while keeping the same per-profile quality. Progress callback is
+    called from the main thread (Streamlit-safe).
 
     Args:
         usernames: List of LinkedIn public identifiers
@@ -106,40 +107,36 @@ def enrich_profiles(
         Dict mapping username -> profile dict (only successful enrichments)
     """
     from concurrent.futures import ThreadPoolExecutor, as_completed
-    import threading
 
     results = {}
     total = len(usernames)
-    completed = [0]  # mutable counter for thread-safe increment
-    lock = threading.Lock()
+    done_count = 0
 
     def _enrich_one(username):
         profile = enrich_single_profile(username, token)
-        success = profile is not None
-        with lock:
-            completed[0] += 1
-            if success:
-                results[username] = profile
-            if progress_callback:
-                progress_callback(completed[0], total, username, success)
         return username, profile
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        # Submit all jobs
         futures = {}
         for i, username in enumerate(usernames):
-            # Stagger submissions slightly to avoid hammering Apify
             if i > 0 and i % max_workers == 0:
                 time.sleep(1)
             futures[executor.submit(_enrich_one, username)] = username
 
+        # Collect results from main thread (Streamlit-safe for progress updates)
         for future in as_completed(futures):
+            username = futures[future]
             try:
-                future.result()
+                uname, profile = future.result()
+                success = profile is not None
+                if success:
+                    results[uname] = profile
             except Exception:
-                username = futures[future]
-                with lock:
-                    completed[0] += 1
-                    if progress_callback:
-                        progress_callback(completed[0], total, username, False)
+                success = False
+
+            done_count += 1
+            if progress_callback:
+                progress_callback(done_count, total, username, success)
 
     return results

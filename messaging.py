@@ -98,7 +98,6 @@ def generate_messages(
         {username: message_dict}
     """
     from concurrent.futures import ThreadPoolExecutor, as_completed
-    import threading
 
     results = {}
     # Only generate for profiles that passed tiering
@@ -116,18 +115,11 @@ def generate_messages(
     if total == 0:
         return results
 
-    completed = [0]
-    lock = threading.Lock()
+    done_count = 0
 
     def _generate_one(username, tier_data):
         profile = enriched.get(username, {})
-        msgs = generate_messages_for_profile(profile, tier_data, api_key)
-        with lock:
-            completed[0] += 1
-            results[username] = msgs
-            if progress_callback:
-                progress_callback(completed[0], total, username)
-        return username
+        return username, generate_messages_for_profile(profile, tier_data, api_key)
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = {
@@ -135,17 +127,18 @@ def generate_messages(
             for u, t in eligible.items()
         }
         for future in as_completed(futures):
+            username = futures[future]
             try:
-                future.result()
+                uname, msgs = future.result()
+                results[uname] = msgs
             except Exception:
-                username = futures[future]
-                with lock:
-                    completed[0] += 1
-                    results[username] = {
-                        **EMPTY_MESSAGES,
-                        "msg_connection_request": "[ERROR: generation failed]",
-                    }
-                    if progress_callback:
-                        progress_callback(completed[0], total, username)
+                results[username] = {
+                    **EMPTY_MESSAGES,
+                    "msg_connection_request": "[ERROR: generation failed]",
+                }
+
+            done_count += 1
+            if progress_callback:
+                progress_callback(done_count, total, username)
 
     return results
