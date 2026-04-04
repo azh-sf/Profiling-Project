@@ -135,7 +135,7 @@ st.header("1. Input LinkedIn Profiles")
 
 input_method = st.radio(
     "Input method:",
-    ["Paste usernames", "Upload CSV", "Re-run messages (upload previous batch)"],
+    ["Paste usernames", "Upload CSV", "Backfill messages from Sheets"],
     horizontal=True,
 )
 
@@ -179,63 +179,56 @@ else:
                 if len(usernames) > 10:
                     st.caption(f"... and {len(usernames) - 10} more")
 
-elif input_method == "Re-run messages (upload previous batch)":
-    st.markdown(
-        "Upload a previous tiering CSV (from Google Sheets or a downloaded batch). "
-        "The app will re-enrich the profiles and generate messages for any that are missing."
-    )
-    prev_upload = st.file_uploader(
-        "Upload previous batch CSV",
-        type=["csv"],
-        key="prev_batch_upload",
-    )
-    if prev_upload:
-        prev_df = pd.read_csv(prev_upload)
-        st.success(f"Loaded **{len(prev_df)}** profiles from previous batch")
+elif input_method == "Backfill messages from Sheets":
+    from sheets import get_batches_needing_messages, update_sheet_tab
 
-        # Check which have messages
-        msg_col = 'msg_connection_request'
-        if msg_col in prev_df.columns:
-            has_msg = prev_df[msg_col].fillna('').str.strip().ne('').sum()
-            missing_msg = len(prev_df) - has_msg
-        else:
-            has_msg = 0
-            missing_msg = len(prev_df)
+    st.markdown("Scanning Google Sheets for batches with missing messages...")
 
-        # Filter to eligible (not Out of Scope, not Customer)
-        eligible_mask = (
-            prev_df.get('tier', pd.Series(dtype=str)).isin(['1', '2', '3'])
-            & (prev_df.get('customer_exclusion_flag', pd.Series(dtype=str)) != 'YES')
-        )
-        eligible_no_msg = eligible_mask & prev_df[msg_col].fillna('').str.strip().eq('') if msg_col in prev_df.columns else eligible_mask
-        needs_messages = eligible_no_msg.sum()
+    batches = get_batches_needing_messages(st.secrets)
 
-        st.info(
-            f"**{has_msg}** already have messages | "
-            f"**{needs_messages}** eligible profiles need messages | "
-            f"This will re-enrich and generate messages for the {needs_messages} missing ones."
+    if not batches:
+        st.success("All batches in Google Sheets have complete messages.")
+    else:
+        for batch in batches:
+            st.markdown(
+                f"**{batch['name']}** — "
+                f"{batch['missing_msgs']} of {batch['eligible']} eligible profiles missing messages"
+            )
+
+        selected = st.selectbox(
+            "Select batch to backfill:",
+            options=range(len(batches)),
+            format_func=lambda i: f"{batches[i]['name']} ({batches[i]['missing_msgs']} missing)",
         )
 
-        if needs_messages > 0:
-            # Extract LinkedIn usernames for profiles that need messages
-            url_col = None
-            for c in ['linkedin_url', 'url', 'linkedin']:
-                if c in prev_df.columns:
-                    url_col = c
-                    break
+        if selected is not None:
+            batch = batches[selected]
+            prev_df = batch['df']
 
-            if url_col:
-                from utils import clean_linkedin_username
-                need_msg_urls = prev_df.loc[eligible_no_msg, url_col].dropna()
-                usernames = [clean_linkedin_username(str(u)) for u in need_msg_urls if clean_linkedin_username(str(u))]
-                st.success(f"**{len(usernames)}** profiles to re-enrich and message")
-
-                # Store the previous tiering so we can merge later
-                st.session_state['_prev_batch_df'] = prev_df
-                st.session_state['_rerun_mode'] = True
+            # Extract usernames for profiles needing messages
+            from utils import clean_linkedin_username
+            msg_col = 'msg_connection_request'
+            eligible_mask = (
+                prev_df['tier'].isin(['1', '2', '3'])
+                & (prev_df.get('customer_exclusion_flag', pd.Series(dtype=str)) != 'YES')
+            )
+            if msg_col in prev_df.columns:
+                missing_mask = eligible_mask & prev_df[msg_col].fillna('').str.strip().eq('')
             else:
-                st.error("CSV must have a 'linkedin_url' column")
-                usernames = []
+                missing_mask = eligible_mask
+
+            need_msg = prev_df.loc[missing_mask]
+            usernames = [
+                clean_linkedin_username(str(u))
+                for u in need_msg['linkedin_url'].dropna()
+                if clean_linkedin_username(str(u))
+            ]
+
+            if usernames:
+                st.info(f"**{len(usernames)} profiles** need re-enrichment + messaging.")
+                st.session_state['_prev_batch_df'] = prev_df
+                st.session_state['_prev_batch_tab'] = batch['name']
+                st.session_state['_rerun_mode'] = True
 
 
 # ─── Run Pipeline ────────────────────────────────────────────────────────────
@@ -531,6 +524,7 @@ if (st.session_state.get('_enriched') and st.session_state.get('_tiered')
 
             # If re-run mode, merge new messages into previous batch
             if st.session_state.get('_rerun_mode') and '_prev_batch_df' in st.session_state:
+                from sheets import update_sheet_tab
                 prev_df = st.session_state['_prev_batch_df']
                 msg_cols = [
                     'msg_connection_request', 'msg_follow_up_accepted',
@@ -552,6 +546,15 @@ if (st.session_state.get('_enriched') and st.session_state.get('_tiered')
                 df = prev_df
                 st.session_state['results_df'] = df
                 st.info("Messages merged back into the original batch.")
+
+                # Update the original Sheets tab
+                tab_name = st.session_state.get('_prev_batch_tab')
+                if tab_name:
+                    ok, msg = update_sheet_tab(df, st.secrets, tab_name)
+                    if ok:
+                        st.success(f"Updated Google Sheet tab: **{tab_name}**")
+                    else:
+                        st.warning(f"Could not update Sheet: {msg}")
 
             save_batch_to_history(df)
 

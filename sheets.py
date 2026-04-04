@@ -79,6 +79,95 @@ def save_batch_to_sheets(df, streamlit_secrets, stage="full"):
         return False, f"Google Sheets error: {type(e).__name__}: {str(e)[:200]}"
 
 
+def get_batches_needing_messages(streamlit_secrets):
+    """Find tiering batches in Sheets that have profiles missing messages.
+
+    Returns:
+        List of dicts: {'name', 'tab_id', 'total', 'missing_msgs', 'df'}
+    """
+    client = _get_client(streamlit_secrets)
+    if client is None:
+        return []
+
+    try:
+        sh = client.open_by_url(SHEET_URL)
+        results = []
+        for ws in sh.worksheets():
+            if ws.title == 'Sheet1':
+                continue
+            # Only check tiering tabs (they have profiles without messages)
+            try:
+                data = ws.get_all_records()
+                if not data:
+                    continue
+                df = pd.DataFrame(data)
+
+                # Must have tiering columns
+                if 'tier' not in df.columns or 'linkedin_url' not in df.columns:
+                    continue
+
+                # Check for eligible profiles missing messages
+                msg_col = 'msg_connection_request'
+                eligible = df[
+                    df['tier'].isin(['1', '2', '3'])
+                    & (df.get('customer_exclusion_flag', pd.Series(dtype=str)) != 'YES')
+                ]
+
+                if msg_col in df.columns:
+                    missing = eligible[eligible[msg_col].fillna('').str.strip().eq('')]
+                else:
+                    missing = eligible
+
+                if len(missing) > 0:
+                    results.append({
+                        'name': ws.title,
+                        'tab_id': ws.id,
+                        'total': len(df),
+                        'eligible': len(eligible),
+                        'missing_msgs': len(missing),
+                        'df': df,
+                    })
+            except Exception:
+                continue
+
+        return results
+    except Exception:
+        return []
+
+
+def update_sheet_tab(df, streamlit_secrets, tab_name):
+    """Update an existing tab in the Google Sheet with new data."""
+    client = _get_client(streamlit_secrets)
+    if client is None:
+        return False, "Not configured"
+
+    try:
+        sh = client.open_by_url(SHEET_URL)
+        ws = sh.worksheet(tab_name)
+
+        headers = df.columns.tolist()
+        rows = []
+        for _, row in df.iterrows():
+            row_data = []
+            for val in row:
+                s = str(val) if val is not None else ''
+                if len(s) > 5000:
+                    s = s[:5000] + '...'
+                row_data.append(s)
+            rows.append(row_data)
+
+        ws.clear()
+        ws.update('A1', [headers])
+        chunk_size = 50
+        for i in range(0, len(rows), chunk_size):
+            chunk = rows[i:i + chunk_size]
+            ws.update(f'A{i + 2}', chunk)
+
+        return True, tab_name
+    except Exception as e:
+        return False, f"{type(e).__name__}: {str(e)[:200]}"
+
+
 def get_batch_history(streamlit_secrets):
     """Get list of previous batch tabs from the Google Sheet.
 
