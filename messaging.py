@@ -80,18 +80,26 @@ def generate_messages(
     tiered: dict,
     api_key: str,
     progress_callback=None,
+    max_workers: int = 3,
 ) -> dict:
-    """Generate messages for all tiered profiles.
+    """Generate messages for all tiered profiles with parallel execution.
+
+    Runs up to max_workers concurrent Claude API calls for speed.
+    Same per-profile quality — just faster.
 
     Args:
         enriched: {username: apify_profile_dict}
         tiered: {username: tier_result_dict}
         api_key: Anthropic API key
         progress_callback: Optional callable(current, total, username)
+        max_workers: Max concurrent Claude API calls (default 3)
 
     Returns:
         {username: message_dict}
     """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    import threading
+
     results = {}
     # Only generate for profiles that passed tiering
     eligible = {
@@ -105,12 +113,39 @@ def generate_messages(
     for u in skipped:
         results[u] = EMPTY_MESSAGES.copy()
 
-    # Generate for eligible profiles
-    for i, (username, tier_data) in enumerate(eligible.items()):
-        profile = enriched.get(username, {})
-        results[username] = generate_messages_for_profile(profile, tier_data, api_key)
+    if total == 0:
+        return results
 
-        if progress_callback:
-            progress_callback(i + 1, total, username)
+    completed = [0]
+    lock = threading.Lock()
+
+    def _generate_one(username, tier_data):
+        profile = enriched.get(username, {})
+        msgs = generate_messages_for_profile(profile, tier_data, api_key)
+        with lock:
+            completed[0] += 1
+            results[username] = msgs
+            if progress_callback:
+                progress_callback(completed[0], total, username)
+        return username
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {
+            executor.submit(_generate_one, u, t): u
+            for u, t in eligible.items()
+        }
+        for future in as_completed(futures):
+            try:
+                future.result()
+            except Exception:
+                username = futures[future]
+                with lock:
+                    completed[0] += 1
+                    results[username] = {
+                        **EMPTY_MESSAGES,
+                        "msg_connection_request": "[ERROR: generation failed]",
+                    }
+                    if progress_callback:
+                        progress_callback(completed[0], total, username)
 
     return results

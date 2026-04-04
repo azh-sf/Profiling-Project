@@ -86,37 +86,60 @@ def enrich_single_profile(username: str, token: str, timeout: int = 90) -> Optio
 
 
 def enrich_profiles(
-    usernames: list[str],
+    usernames: list,
     token: str,
     progress_callback=None,
-    rate_limit: float = 2.0,
+    max_workers: int = 5,
 ) -> dict:
-    """Enrich multiple LinkedIn profiles.
+    """Enrich multiple LinkedIn profiles with parallel execution.
+
+    Runs up to max_workers concurrent Apify actor calls for speed,
+    while keeping the same per-profile quality.
 
     Args:
         usernames: List of LinkedIn public identifiers
         token: Apify API token
         progress_callback: Optional callable(current, total, username, success)
-        rate_limit: Seconds to wait between requests
+        max_workers: Max concurrent Apify actor runs (default 5)
 
     Returns:
         Dict mapping username -> profile dict (only successful enrichments)
     """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    import threading
+
     results = {}
     total = len(usernames)
+    completed = [0]  # mutable counter for thread-safe increment
+    lock = threading.Lock()
 
-    for i, username in enumerate(usernames):
+    def _enrich_one(username):
         profile = enrich_single_profile(username, token)
         success = profile is not None
+        with lock:
+            completed[0] += 1
+            if success:
+                results[username] = profile
+            if progress_callback:
+                progress_callback(completed[0], total, username, success)
+        return username, profile
 
-        if success:
-            results[username] = profile
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {}
+        for i, username in enumerate(usernames):
+            # Stagger submissions slightly to avoid hammering Apify
+            if i > 0 and i % max_workers == 0:
+                time.sleep(1)
+            futures[executor.submit(_enrich_one, username)] = username
 
-        if progress_callback:
-            progress_callback(i + 1, total, username, success)
-
-        # Rate limit between requests (skip after last)
-        if i < total - 1:
-            time.sleep(rate_limit)
+        for future in as_completed(futures):
+            try:
+                future.result()
+            except Exception:
+                username = futures[future]
+                with lock:
+                    completed[0] += 1
+                    if progress_callback:
+                        progress_callback(completed[0], total, username, False)
 
     return results
