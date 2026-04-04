@@ -13,6 +13,7 @@ from utils import (
 from enrichment import enrich_profiles
 from tiering import tier_profiles
 from messaging import generate_messages
+from sheets import save_batch_to_sheets, get_batch_history
 
 
 # ─── Batch history ───────────────────────────────────────────────────────────
@@ -94,9 +95,10 @@ with st.sidebar:
     st.caption("Messaging: Claude Opus 4.6 (2 parallel workers)")
 
     # ── Previous Batches ─────────────────────────────────────────
+    # Session history
     if st.session_state.get('batch_history'):
         st.divider()
-        st.subheader("Previous Batches")
+        st.subheader("This Session")
         for i, batch in enumerate(reversed(st.session_state['batch_history'])):
             st.markdown(
                 f"**{batch['label']}**  \n"
@@ -115,6 +117,16 @@ with st.sidebar:
                     st.session_state['results_df'] = batch['df']
                     st.session_state['pipeline_complete'] = True
                     st.rerun()
+
+    # Persistent Google Sheets history
+    st.divider()
+    st.subheader("All Batches (Google Sheets)")
+    sheets_history = get_batch_history(st.secrets)
+    if sheets_history:
+        for tab in sheets_history[:10]:  # Show last 10
+            st.markdown(f"[{tab['name']}]({tab['url']})")
+    else:
+        st.caption("No batches saved yet")
 
 
 # ─── Input ───────────────────────────────────────────────────────────────────
@@ -274,6 +286,13 @@ if usernames:
                     key="tiering_backup",
                 )
 
+                # Auto-save tiering to Google Sheets
+                ok, msg = save_batch_to_sheets(tiering_df, st.secrets, stage="tiering")
+                if ok:
+                    st.success(f"Tiering saved to Google Sheets: **{msg}**")
+                else:
+                    st.warning(f"Could not save to Sheets: {msg}")
+
                 # ── Stage 3: Messaging ───────────────────────────────
                 messages = {}
                 if generate_msgs:
@@ -323,15 +342,22 @@ if usernames:
                 st.session_state['pipeline_complete'] = True
                 save_batch_to_history(df)
 
+                # Auto-save full results to Google Sheets
+                ok, msg = save_batch_to_sheets(df, st.secrets, stage="full")
+                if ok:
+                    st.success(f"Full results saved to Google Sheets: **{msg}**")
+                else:
+                    st.warning(f"Could not save to Sheets: {msg}")
+
                 # ── Prominent download banner ────────────────────────
                 st.divider()
                 st.markdown(
                     f"### Pipeline complete — {len(enriched)} profiles processed "
                     f"in {elapsed/60:.1f} minutes"
                 )
-                st.warning(
-                    "**Download your CSV now.** Results are lost if you close this tab "
-                    "or start a new batch without downloading."
+                st.info(
+                    "Results auto-saved to **Google Sheets**. "
+                    "You can also download the CSV below."
                 )
                 csv_data = dataframe_to_csv(df)
                 fname = f"stellar_outreach_{datetime.now().strftime('%Y%m%d_%H%M')}.csv"
