@@ -71,8 +71,8 @@ def generate_messages_for_profile(
 
         return result
 
-    except (json.JSONDecodeError, anthropic.APIError, IndexError, KeyError) as e:
-        return {**EMPTY_MESSAGES, "msg_connection_request": f"[ERROR: {type(e).__name__}]"}
+    except Exception as e:
+        return {**EMPTY_MESSAGES, "msg_connection_request": f"[ERROR: {type(e).__name__}: {str(e)[:100]}]"}
 
 
 def generate_messages(
@@ -117,15 +117,19 @@ def generate_messages(
 
     done_count = 0
 
+    import time as _time
+
     def _generate_one(username, tier_data):
         profile = enriched.get(username, {})
         return username, generate_messages_for_profile(profile, tier_data, api_key)
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = {
-            executor.submit(_generate_one, u, t): u
-            for u, t in eligible.items()
-        }
+        futures = {}
+        for i, (u, t) in enumerate(eligible.items()):
+            # Stagger to stay within API rate limits
+            if i > 0 and i % max_workers == 0:
+                _time.sleep(2)
+            futures[executor.submit(_generate_one, u, t)] = u
         for future in as_completed(futures):
             username = futures[future]
             try:

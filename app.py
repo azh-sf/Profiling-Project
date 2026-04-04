@@ -91,7 +91,7 @@ with st.sidebar:
     st.divider()
     st.caption("Enrichment: Apify (5 parallel workers)")
     st.caption("Tiering: Python regex (instant)")
-    st.caption("Messaging: Claude Opus 4.6 (3 parallel workers)")
+    st.caption("Messaging: Claude Opus 4.6 (2 parallel workers)")
 
     # ── Previous Batches ─────────────────────────────────────────
     if st.session_state.get('batch_history'):
@@ -246,7 +246,13 @@ if usernames:
                 )
                 cols[4].metric("Customers", cust_count)
 
+                # ── Checkpoint: save enrichment + tiering before messaging ──
+                # This ensures we never lose enrichment/tiering work if messaging crashes
+                st.session_state['_enriched'] = enriched
+                st.session_state['_tiered'] = tiered
+
                 # ── Stage 3: Messaging ───────────────────────────────
+                messages = {}
                 if generate_msgs:
                     eligible_count = sum(
                         1 for t in tiered.values()
@@ -255,7 +261,7 @@ if usernames:
                     )
                     st.subheader(
                         f"Stage 3: Generating messages for {eligible_count} "
-                        f"eligible profiles (3 parallel workers)"
+                        f"eligible profiles (2 parallel workers)"
                     )
                     msg_progress = st.progress(0, text="Starting message generation...")
 
@@ -265,17 +271,19 @@ if usernames:
                             text=f"Generating messages {current}/{total}...",
                         )
 
-                    messages = generate_messages(
-                        enriched, tiered, anthropic_key,
-                        progress_callback=msg_callback,
-                        max_workers=3,
-                    )
-                    msg_progress.progress(1.0, text="Message generation complete")
-                    st.success(f"Generated messages for **{eligible_count}** profiles")
-                else:
-                    messages = {}
+                    try:
+                        messages = generate_messages(
+                            enriched, tiered, anthropic_key,
+                            progress_callback=msg_callback,
+                            max_workers=2,
+                        )
+                        msg_progress.progress(1.0, text="Message generation complete")
+                        generated = sum(1 for m in messages.values() if m.get('msg_connection_request', '').strip() and not m['msg_connection_request'].startswith('[ERROR'))
+                        st.success(f"Generated messages for **{generated}/{eligible_count}** profiles")
+                    except Exception as e:
+                        st.error(f"Messaging failed: {type(e).__name__}. Saving tiering results without messages.")
 
-                # ── Finish ───────────────────────────────────────────
+                # ── Finish — always save results even if messaging partially failed ──
                 elapsed = (datetime.now() - start_time).total_seconds()
                 st.info(f"Pipeline complete in **{elapsed/60:.1f} minutes** ({len(enriched)} profiles)")
 
