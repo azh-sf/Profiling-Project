@@ -11,9 +11,16 @@ SHEET_URL = "https://docs.google.com/spreadsheets/d/15v1T-LOS2MjFyebG4zVJv3nhhP_
 def _get_client(streamlit_secrets):
     """Create gspread client from Streamlit secrets."""
     try:
+        # Try as TOML table first (Streamlit native format)
+        creds_dict = dict(streamlit_secrets["GOOGLE_SERVICE_ACCOUNT"])
+        return gspread.service_account_from_dict(creds_dict)
+    except (KeyError, TypeError):
+        pass
+    try:
+        # Fallback: try as JSON string
         creds_dict = json.loads(streamlit_secrets["GOOGLE_SERVICE_ACCOUNT"])
         return gspread.service_account_from_dict(creds_dict)
-    except (KeyError, json.JSONDecodeError):
+    except (KeyError, json.JSONDecodeError, TypeError):
         return None
 
 
