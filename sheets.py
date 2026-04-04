@@ -50,11 +50,28 @@ def save_batch_to_sheets(df, streamlit_secrets, stage="full"):
         ws = sh.add_worksheet(title=tab_name, rows=len(df) + 1, cols=len(df.columns))
 
         # Write headers + data
-        # Convert all values to strings to avoid serialization issues
+        # Convert all values to strings, truncate long cells to avoid API limits
         headers = df.columns.tolist()
-        rows = df.fillna('').astype(str).values.tolist()
+        rows = []
+        for _, row in df.iterrows():
+            row_data = []
+            for val in row:
+                s = str(val) if val is not None else ''
+                # Google Sheets cell limit is 50K chars, but keep reasonable for API payload
+                if len(s) > 5000:
+                    s = s[:5000] + '...'
+                row_data.append(s)
+            rows.append(row_data)
 
-        ws.update([headers] + rows)
+        # Write in chunks to avoid 10MB request limit
+        chunk_size = 50
+        # Write headers first
+        ws.update('A1', [headers])
+
+        for i in range(0, len(rows), chunk_size):
+            chunk = rows[i:i + chunk_size]
+            start_row = i + 2  # +2 because row 1 is headers, Sheets is 1-indexed
+            ws.update(f'A{start_row}', chunk)
 
         return True, tab_name
 
