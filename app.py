@@ -77,22 +77,35 @@ with st.sidebar:
     anthropic_key = st.text_input(
         "Anthropic API Key", value=ANTHROPIC_API_KEY, type="password",
     )
+    google_key = st.text_input(
+        "Google AI API Key (for Gemini)", value=get_secret("GOOGLE_AI_KEY"), type="password",
+    )
 
     st.divider()
     st.subheader("Pipeline Options")
+
+    from messaging import MODELS
+    model_name = st.selectbox(
+        "Messaging model",
+        options=list(MODELS.keys()),
+        index=0,
+        help="Opus = highest quality, Gemini = cheapest, Sonnet = middle ground",
+    )
+    model_cost = MODELS[model_name]["cost_per_profile"]
+    st.caption(f"Est. cost: {model_cost} per profile")
 
     skip_enrichment = st.checkbox(
         "Skip enrichment (pre-enriched data)", value=False,
     )
     generate_msgs = st.checkbox(
         "Generate messages", value=True,
-        help="Uncheck to only enrich and tier (no Claude cost)",
+        help="Uncheck to only enrich and tier (no API cost)",
     )
 
     st.divider()
     st.caption("Enrichment: Apify (5 parallel workers)")
     st.caption("Tiering: Python regex (instant)")
-    st.caption("Messaging: Claude Opus 4.6 (2 parallel workers)")
+    st.caption(f"Messaging: {model_name}")
 
     # ── Previous Batches ─────────────────────────────────────────
     # Session history
@@ -489,6 +502,8 @@ if (st.session_state.get('_enriched') and st.session_state.get('_tiered')
                         enriched, chunk, anthropic_key,
                         progress_callback=msg_callback,
                         max_workers=1,
+                        model_name=model_name,
+                        google_api_key=google_key,
                     )
 
                     # Merge into existing messages
@@ -736,5 +751,5 @@ if st.session_state.get('pipeline_complete') and 'results_df' in st.session_stat
 st.divider()
 st.caption(
     "Stellar Fusion Group Limited | Enrichment: Apify | "
-    "Tiering: Python | Messaging: Claude Opus 4.6"
+    "Tiering: Python | Messaging: Claude / Gemini"
 )
