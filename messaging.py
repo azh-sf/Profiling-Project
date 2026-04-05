@@ -36,9 +36,17 @@ def _parse_response(raw_text):
     for key in MESSAGE_KEYS:
         result[key] = messages.get(key, "")
 
+    # Flag if connection request is over 300 chars but DON'T truncate mid-sentence
     cr = result["msg_connection_request"]
     if len(cr) > 300:
-        result["msg_connection_request"] = cr[:297] + "..."
+        # Try to cut at last complete sentence within 300 chars
+        truncated = cr[:300]
+        last_period = truncated.rfind('.')
+        last_question = truncated.rfind('?')
+        cut_at = max(last_period, last_question)
+        if cut_at > 200:  # Only cut at sentence if we keep enough content
+            result["msg_connection_request"] = cr[:cut_at + 1]
+        # Otherwise leave it slightly over — better than a broken sentence
 
     return result
 

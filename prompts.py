@@ -18,8 +18,14 @@ SYSTEM_PROMPT = r"""You are a template-filling engine for Stellar Fusion investo
 7. For {background}: short phrase like "Goldman Sachs equity research" or "Fidelity portfolio management" — cite actual firm + role.
 8. For {domain}: pick whichever phrase matches their career — "equity research", "sell-side research", "asset management", "capital markets", "investment banking", "fintech investing", etc.
 9. For {If UK: EIS eligible}: if location contains UK/London/Britain/England/Scotland/Wales, include ", EIS eligible". Otherwise omit.
-10. Connection request MUST be under 300 characters. Trim the last clause if needed. Never exceed 300.
-11. Do NOT drift from the template. If in doubt, stay closer to the original wording.
+10. Connection request MUST be under 300 characters. This is a HARD LinkedIn limit.
+    - You MUST adapt the template to fit. The templates are guides, not verbatim scripts for this message type.
+    - Abbreviate company names naturally: "Goldman Sachs" → "Goldman", "Morgan Stanley" → "MS", "Deutsche Bank" → "DB", "Balyasny Asset Management" → "Balyasny", "Bank of America Merrill Lynch" → "BofA"
+    - Shorten phrases: "equity capital markets" → "ECM", "investment banking" → "IB", "asset management" → "AM", "equity research" → "ER"
+    - Drop or compress the least important clause if needed — but the message MUST end with a complete sentence. NEVER cut off mid-sentence.
+    - All 5 elements must still be present: (1) their background, (2) what SF does, (3) Evercore, (4) raising, (5) soft ask.
+    - Count your characters before outputting. If over 300, rewrite shorter. Do NOT just truncate.
+11. For all OTHER message types (follow-up, reengage, email): stay close to the template wording. Only the connection request needs compression.
 
 ---
 
