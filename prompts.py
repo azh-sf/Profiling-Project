@@ -31,14 +31,27 @@ SYSTEM_PROMPT = r"""You are a template-filling engine for Stellar Fusion investo
 
 ## TEMPLATE 1: msg_connection_request
 
-**Variant A — Tier 1 (former sell-side research):**
-Hi {name}, I noticed your background in {domain} at {firm}. We've built the data infrastructure that makes sell-side Excel models machine-readable for the first time — essentially the data bridge between sell-side research and buy-side AI. Evercore ISI signed, bulge bracket piloting. Raising from relevant angels.
+Select the variant that BEST matches the profile. Read the career signals carefully.
 
-**Variant B — Tier 2 (buy-side / ECM / IB):**
-Hi {name}, given your background across {domain} at {firm}, thought this might resonate. We've built the infrastructure making sell-side research models computable for the first time. Evercore ISI signed and going live. Raising an angel round from capital markets professionals.
+**Variant A — Ex equity research analyst (Tier 1):**
+Lean on: their deep understanding of the sell-side model problem from firsthand experience.
+Hi {name}, having spent years in {domain} at {firm}, you'll know the problem — sell-side models locked in disconnected Excel. We've built the infrastructure to make them computable. Evercore ISI signed. Raising an angel round from people who lived this.
 
-**Variant C — Tier 3 (angel / fintech / family office):**
-Hi {name}, we're building what we think is a critical piece of missing infrastructure in finance. As AI agents handle more equity analysis, they need computable sell-side model data — not PDFs. We provide that layer. Evercore ISI live mid-2026, 900+ stocks. Raising £800k ahead of a Series A.
+**Variant B — Angel with capital markets background (Tier 2/3 with angel signals):**
+Lean on: their angel investing track record AND their capital markets awareness of the problem.
+Hi {name}, given your angel investing and {domain} background at {firm}, thought this might resonate. We're making sell-side research models computable for AI. Evercore ISI signed. Raising from capital markets angels.
+
+**Variant C — Angel/investor in equities or buy-side (Tier 1/2 with investing signals):**
+Lean on: their understanding of the problem from the equities side AND the AI opportunity.
+Hi {name}, given your {domain} experience at {firm}, thought you'd see the opportunity. AI agents need computable sell-side model data — we've built that layer. Evercore ISI signed. Raising from industry angels.
+
+**Variant D — Family office / ex-equities investor (Tier 3 with family office or wealth signals):**
+Lean on: their understanding of the problem AND the scale of the opportunity.
+Hi {name}, given your background across {domain}, thought this would resonate. We're unlocking sell-side model data for AI — a >$2B TAM that nobody else is addressing. Evercore ISI signed. Raising an angel round.
+
+**Variant E — Angel in finance/fintech (Tier 3, no equities background):**
+Lean on: their angel experience AND the uniqueness of the TAM we're unlocking.
+Hi {name}, given your fintech investing background, thought Stellar Fusion might interest you. We're unlocking a >$2B TAM — making sell-side research models computable for AI. Evercore ISI signed. Raising £800k ahead of Series A.
 
 ---
 
@@ -239,20 +252,51 @@ def build_user_prompt(profile: dict, tier_data: dict) -> str:
     experiences = '\n'.join(exp_lines) if exp_lines else 'No experience data'
 
     tier = tier_data.get('tier', '')
-    variant_map = {'1': 'A (Tier 1 — former sell-side research)',
-                   '2': 'B (Tier 2 — buy-side / ECM / IB)',
-                   '3': 'C (Tier 3 — angel / fintech / family office)'}
-    variant = variant_map.get(tier, 'C (Tier 3 — angel / fintech / family office)')
+    fit_summary = tier_data.get('investor_fit_summary', '')
+    signals = tier_data.get('key_career_signals', '')
+
+    # Determine connection request variant based on profile type
+    about = bi.get('about', '') or ''
+    all_titles = ' '.join([e.get('title', '') for e in profile.get('experience', [])]).lower()
+    has_angel = 'angel' in all_titles or 'angel' in about.lower() or 'angel' in headline.lower()
+    has_family_office = 'family office' in all_titles or 'family office' in about.lower()
+    has_venture = 'venture' in all_titles or 'venture' in headline.lower()
+    has_er = 'equity research' in all_titles or 'research analyst' in all_titles or 'equity analyst' in all_titles
+    has_buyside = 'portfolio manager' in all_titles or 'fund manager' in all_titles or 'investment manager' in all_titles
+    has_ecm_ib = 'equity capital' in all_titles or 'investment banking' in all_titles or 'ecm' in all_titles
+
+    if tier == '1' and has_er and not has_angel:
+        cr_variant = 'A (ex equity research — lean on their deep understanding of the sell-side model problem)'
+    elif (has_angel or has_venture) and (has_ecm_ib or has_er or has_buyside):
+        cr_variant = 'B (angel with capital markets background — lean on angel track record + awareness of problem)'
+    elif tier in ('1', '2') and (has_buyside or has_er) and (has_angel or has_venture or 'investor' in headline.lower()):
+        cr_variant = 'C (angel/investor in equities — lean on understanding of problem + AI opportunity)'
+    elif has_family_office or (has_buyside and (has_angel or has_venture)):
+        cr_variant = 'D (family office / ex-equities — lean on understanding of problem + scale of opportunity)'
+    elif has_angel or has_venture:
+        cr_variant = 'E (angel in finance/fintech — lean on angel experience + unique TAM)'
+    elif tier == '1':
+        cr_variant = 'A (ex equity research — lean on their deep understanding of the sell-side model problem)'
+    elif tier == '2':
+        cr_variant = 'C (angel/investor in equities — lean on understanding of problem + AI opportunity)'
+    else:
+        cr_variant = 'E (angel in finance/fintech — lean on angel experience + unique TAM)'
+
+    # Follow-up/reengage/email variant stays tier-based
+    body_variant_map = {'1': 'A (Tier 1)', '2': 'B (Tier 2)', '3': 'C (Tier 3)'}
+    body_variant = body_variant_map.get(tier, 'C (Tier 3)')
 
     return f"""Fill the placeholders in all 6 templates using this profile data.
-Use **Variant {variant}** for all templates.
+
+For msg_connection_request: Use **Variant {cr_variant}**
+For all other messages (follow-up, reengage, email): Use **Variant {body_variant}**
 
 Name (for {{name}}): {first_name}
 Location: {location}
 Headline: {headline}
 Tier: {tier}
-Key signals: {tier_data.get('key_career_signals', '')}
-Fit summary: {tier_data.get('investor_fit_summary', '')}
+Key signals: {signals}
+Fit summary: {fit_summary}
 
 Career history (use to determine {{firm}}, {{background}}, {{domain}}):
 {experiences}
@@ -260,8 +304,8 @@ Career history (use to determine {{firm}}, {{background}}, {{domain}}):
 Rules:
 - {{name}} = {first_name}
 - {{firm}} = pick the most recognisable/relevant firm from their career
-- {{background}} = short phrase like "Goldman Sachs equity research" citing actual firm + role
-- {{domain}} = pick whichever phrase matches: "equity research", "sell-side research", "public equities", "capital markets", "investment banking", "fintech investing", "financial services", etc.
+- {{background}} = short phrase citing actual firm + role
+- {{domain}} = pick whichever phrase matches their career
 - If location contains UK/London/Britain/England/Scotland/Wales, include ", EIS eligible" where marked. Otherwise omit.
-- msg_connection_request MUST be under 300 characters total.
-- Do NOT add any text that isn't in the templates. ONLY fill placeholders."""
+- msg_connection_request MUST be under 300 characters. Abbreviate firm names and compress phrases to fit.
+- Do NOT add compliments or flattery. Stay factual and direct."""
