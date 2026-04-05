@@ -408,7 +408,7 @@ if (st.session_state.get('_enriched') and st.session_state.get('_tiered')
                     all_messages = {**existing_messages}
                     for u in tiered:
                         if u not in all_messages:
-                            all_messages[u] = {k: '' for k in ['msg_connection_request', 'msg_follow_up_accepted', 'msg_reengage_previous', 'msg_reengage_cold', 'msg_email_detailed', 'msg_email_forwardable']}
+                            all_messages[u] = {k: '' for k in ['msg_connection_request', 'msg_follow_up_accepted', 'msg_reengage_previous', 'msg_reengage_cold', 'msg_email_detailed', 'msg_email_cold_followup']}
 
                     df = build_results_dataframe(list(enriched.keys()), enriched, tiered, all_messages)
                     st.session_state['results_df'] = df
@@ -435,7 +435,7 @@ if (st.session_state.get('_enriched') and st.session_state.get('_tiered')
             all_messages = st.session_state.get('_messages', {})
             for u in tiered:
                 if u not in all_messages:
-                    all_messages[u] = {k: '' for k in ['msg_connection_request', 'msg_follow_up_accepted', 'msg_reengage_previous', 'msg_reengage_cold', 'msg_email_detailed', 'msg_email_forwardable']}
+                    all_messages[u] = {k: '' for k in ['msg_connection_request', 'msg_follow_up_accepted', 'msg_reengage_previous', 'msg_reengage_cold', 'msg_email_detailed', 'msg_email_cold_followup']}
 
             df = build_results_dataframe(list(enriched.keys()), enriched, tiered, all_messages)
             st.session_state['results_df'] = df
@@ -495,8 +495,8 @@ if st.session_state.get('pipeline_complete') and 'results_df' in st.session_stat
             msg_val = str(row.get('msg_connection_request', '')).strip()
             if msg_val and not msg_val.startswith('[ERROR'):
                 st.markdown("---")
-                tabs = st.tabs(["Connection Request", "Follow-Up", "Reengage (Prev)", "Reengage (Cold)", "Email", "Forwardable"])
-                msg_cols = ['msg_connection_request', 'msg_follow_up_accepted', 'msg_reengage_previous', 'msg_reengage_cold', 'msg_email_detailed', 'msg_email_forwardable']
+                tabs = st.tabs(["Connection Request", "Follow-Up", "Reengage (Prev)", "Reengage (Cold)", "Email", "Cold Email"])
+                msg_cols = ['msg_connection_request', 'msg_follow_up_accepted', 'msg_reengage_previous', 'msg_reengage_cold', 'msg_email_detailed', 'msg_email_cold_followup']
                 for tab, col_name in zip(tabs, msg_cols):
                     with tab:
                         msg = row.get(col_name, '')

@@ -10,7 +10,7 @@ EMPTY_MESSAGES = {
     "msg_reengage_previous": "",
     "msg_reengage_cold": "",
     "msg_email_detailed": "",
-    "msg_email_forwardable": "",
+    "msg_email_cold_followup": "",
 }
 MESSAGE_KEYS = list(EMPTY_MESSAGES.keys())
 

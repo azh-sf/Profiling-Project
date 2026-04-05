@@ -133,7 +133,7 @@ def build_results_dataframe(
             'msg_reengage_previous': msg_data.get('msg_reengage_previous', ''),
             'msg_reengage_cold': msg_data.get('msg_reengage_cold', ''),
             'msg_email_detailed': msg_data.get('msg_email_detailed', ''),
-            'msg_email_forwardable': msg_data.get('msg_email_forwardable', ''),
+            'msg_email_cold_followup': msg_data.get('msg_email_cold_followup', ''),
             # Review
             'notes_for_review': tier_data.get('notes_for_review', ''),
             'send_recommendation': _derive_send_rec(tier_data),

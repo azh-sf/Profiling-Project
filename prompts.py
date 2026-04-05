@@ -198,20 +198,55 @@ Aneek
 
 ---
 
-## TEMPLATE 6: msg_email_forwardable
-(Same for all tiers — this is a neutral summary designed to be forwarded.)
+## TEMPLATE 6: msg_email_cold_followup
+Cold outreach email sent a few days after an unanswered LinkedIn connection request. Must echo the same angle and personalisation as the connection request — same background reference, same reasoning for why they're relevant — but expanded into email format with more detail.
 
-Subject: Stellar Fusion — Happy to Connect with Your Contact
+This is NOT a forward or intro email. It is a direct cold email to the same person.
 
-{name},
+**Variant A — Tier 1 (former sell-side research):**
+Subject: Stellar Fusion — sell-side model infrastructure (Evercore-backed)
 
-Thanks for offering to make an intro — really appreciate it.
+Hi {name},
 
-Quick summary: I'm an analyst of more than 20 years, building hands-on at Stellar Fusion. We've built the computation engine and data layer that makes sell-side Excel models machine-readable for the first time. As AI agents take on more equity analysis, they need computable model data — not static estimates. We're the data bridge between sell-side and buy-side. Static data is available everywhere. Computable models exist nowhere else.
+I tried to connect on LinkedIn — apologies for the cold email.
 
-Evercore ISI signed and going live mid-2026 across 900+ stocks. >96% ingestion rate, 100% output reconciliation vs source Excel. Bulge bracket piloting, 13 firms in pipeline. CPPIB testing on the buy-side under NDA.
+I'm Aneek Haq, a former sell-side analyst of 20 years (Morgan Stanley, Citi), now building Stellar Fusion. Given your background in {domain} at {firm}, I thought this would resonate.
 
-Raising £800k ahead of a Series A. Happy for you to forward this along.
+We've built the computation engine that makes sell-side Excel models machine-readable for the first time. You'll know the problem — every analyst builds in isolation, every model is a black box. We've solved that. Evercore ISI signed and going live mid-2026 across 900+ stocks. >96% ingestion rate, bulge bracket piloting, 13 firms in pipeline.
+
+Raising £800k{If UK: , EIS eligible} from industry angels — our cap table includes Heads of Equity Research, senior analysts and PMs who lived this problem. Happy to share more on a call if it's of interest.
+
+Best,
+Aneek
+
+**Variant B — Tier 2 (buy-side / ECM / IB):**
+Subject: Stellar Fusion — AI data infrastructure for capital markets
+
+Hi {name},
+
+I tried to connect on LinkedIn — apologies for the cold email.
+
+I'm Aneek Haq, CEO of Stellar Fusion. Given your background across {domain} at {firm}, I thought you'd see the opportunity on both sides of the market.
+
+As AI agents take on more equity analysis, they need computable model data — not static estimates or PDFs. That data sits in sell-side Excel models and nobody has made it machine-readable until now. We've built the engine that does exactly that. Evercore ISI signed and going live mid-2026 across 900+ stocks. Bulge bracket piloting, 13 firms in pipeline.
+
+Raising £800k{If UK: , EIS eligible} from capital markets professionals. Happy to jump on a call if it's of interest.
+
+Best,
+Aneek
+
+**Variant C — Tier 3 (angel / fintech / family office):**
+Subject: Stellar Fusion — >$2B TAM in AI data infrastructure for finance
+
+Hi {name},
+
+I tried to connect on LinkedIn — apologies for the cold email.
+
+I'm Aneek Haq, CEO of Stellar Fusion. Given your background in {domain}, I thought this might be of interest.
+
+We're building the data infrastructure that makes sell-side equity research models computable for AI — a >$2B TAM that nobody else is addressing. Sell-side pays for infrastructure, buy-side pays for programmatic data access. Evercore ISI signed and going live mid-2026 across 900+ stocks. Bulge bracket piloting, 13 firms in pipeline.
+
+Raising £800k{If UK: , EIS eligible} ahead of a Series A. Happy to walk through the opportunity on a call if useful.
 
 Best,
 Aneek
@@ -226,7 +261,7 @@ Return a JSON object with exactly these 6 keys:
   "msg_reengage_previous": "...",
   "msg_reengage_cold": "...",
   "msg_email_detailed": "Subject: ...\\n\\n...",
-  "msg_email_forwardable": "Subject: ...\\n\\n..."
+  "msg_email_cold_followup": "Subject: ...\\n\\n..."
 }
 
 Return ONLY the JSON object. No markdown fences, no explanation, no commentary."""
